@@ -1614,175 +1614,199 @@ def CreateGameMaterial(StingrayMat, mat):
         idx +=1
 
 def CreateAddonMaterial(ID, StingrayMat, mat, Entry):
-    mat.node_tree.nodes.clear()
-    output = mat.node_tree.nodes.new('ShaderNodeOutputMaterial')
-    output.location = (200, 300)
-    group = mat.node_tree.nodes.new('ShaderNodeGroup')
-    treeName = f"{Entry.MaterialTemplate}-{str(ID)}"
-    nodeTree = bpy.data.node_groups.new(treeName, 'ShaderNodeTree')
-    group.node_tree = nodeTree
-    group.location = (0, 300)
+    try:
+        mat.node_tree.nodes.clear()
+        output = mat.node_tree.nodes.new('ShaderNodeOutputMaterial')
+        output.location = (200, 300)
+        group = mat.node_tree.nodes.new('ShaderNodeGroup')
+        treeName = f"{Entry.MaterialTemplate}-{str(ID)}"
+        nodeTree = bpy.data.node_groups.new(treeName, 'ShaderNodeTree')
+        group.node_tree = nodeTree
+        group.location = (0, 300)
 
-    group_input = nodeTree.nodes.new('NodeGroupInput')
-    group_input.location = (-400,0)
-    group_output = nodeTree.nodes.new('NodeGroupOutput')
-    group_output.location = (400,0)
+        group_input = nodeTree.nodes.new('NodeGroupInput')
+        group_input.location = (-400,0)
+        group_output = nodeTree.nodes.new('NodeGroupOutput')
+        group_output.location = (400,0)
 
-    idx = 0
-    height = round(len(StingrayMat.TexIDs) * 300 / 2)
-    RoughnessMaskTex = None
-    for TextureID in StingrayMat.TexIDs:
-        texImage = mat.node_tree.nodes.new('ShaderNodeTexImage')
-        texImage.location = (-450, height - 300*idx)
+        idx = 0
+        height = round(len(StingrayMat.TexIDs) * 300 / 2)
+        RoughnessMaskTex = None
+        for TextureID in StingrayMat.TexIDs:
+            texImage = mat.node_tree.nodes.new('ShaderNodeTexImage')
+            texImage.location = (-450, height - 300*idx)
 
-        if Entry.MaterialTemplate == "advanced":
-            if idx == 2:
-                RoughnessMaskTex = texImage
+            if Entry.MaterialTemplate == "advanced":
+                if idx == 2:
+                    RoughnessMaskTex = texImage
 
-        name = TextureTypeLookup[Entry.MaterialTemplate][idx]
-        socket_type = "NodeSocketColor"
-        nodeTree.interface.new_socket(name=name, in_out ="INPUT", socket_type=socket_type).hide_value = True
+            name = TextureTypeLookup[Entry.MaterialTemplate][idx]
+            socket_type = "NodeSocketColor"
+            nodeTree.interface.new_socket(name=name, in_out ="INPUT", socket_type=socket_type).hide_value = True
 
-        try:    bpy.data.images[str(TextureID)]
-        except: Global_TocManager.Load(TextureID, TexID, False, True)
-        try: texImage.image = bpy.data.images[str(TextureID)]
-        except:
-            PrettyPrint(f"Failed to load texture {TextureID}. This is not fatal, but does mean that the materials in Blender will have empty image texture nodes", "warn")
-            pass
+            try:    bpy.data.images[str(TextureID)]
+            except: Global_TocManager.Load(TextureID, TexID, False, True)
+            try: texImage.image = bpy.data.images[str(TextureID)]
+            except:
+                PrettyPrint(f"Failed to load texture {TextureID}. This is not fatal, but does mean that the materials in Blender will have empty image texture nodes", "warn")
+                pass
+            
+            if "Normal" in name:
+                texImage.image.colorspace_settings.name = 'Non-Color'
+
+            mat.node_tree.links.new(texImage.outputs['Color'], group.inputs[idx])
+            idx +=1
+
+        nodeTree.interface.new_socket(name="Surface",in_out ="OUTPUT", socket_type="NodeSocketShader")
+
+        nodes = mat.node_tree.nodes
+        for node in nodes:
+            if node.type == 'BSDF_PRINCIPLED':
+                nodes.remove(node)
+            elif node.type == 'OUTPUT_MATERIAL':
+                mat.node_tree.links.new(group.outputs['Surface'], node.inputs['Surface'])
         
-        if "Normal" in name:
-            texImage.image.colorspace_settings.name = 'Non-Color'
+        inputNode = nodeTree.nodes.get('Group Input')
+        outputNode = nodeTree.nodes.get('Group Output')
+        bsdf = nodeTree.nodes.new('ShaderNodeBsdfPrincipled')
+        bsdf.location = (50, 0)
+        separateColor = nodeTree.nodes.new('ShaderNodeSeparateColor')
+        separateColor.location = (-150, 0)
+        normalMap = nodeTree.nodes.new('ShaderNodeNormalMap')
+        normalMap.location = (-150, -150)
 
-        mat.node_tree.links.new(texImage.outputs['Color'], group.inputs[idx])
-        idx +=1
+        bsdf.inputs['IOR'].default_value = 1
+        bsdf.inputs['Emission Strength'].default_value = 1
 
-    nodeTree.interface.new_socket(name="Surface",in_out ="OUTPUT", socket_type="NodeSocketShader")
+        bpy.ops.file.unpack_all(method='REMOVE')
+        
+        PrettyPrint(f"Setting up any custom templates. Current Template: {Entry.MaterialTemplate}")
 
-    nodes = mat.node_tree.nodes
-    for node in nodes:
-        if node.type == 'BSDF_PRINCIPLED':
-            nodes.remove(node)
-        elif node.type == 'OUTPUT_MATERIAL':
-             mat.node_tree.links.new(group.outputs['Surface'], node.inputs['Surface'])
-    
-    inputNode = nodeTree.nodes.get('Group Input')
-    outputNode = nodeTree.nodes.get('Group Output')
-    bsdf = nodeTree.nodes.new('ShaderNodeBsdfPrincipled')
-    bsdf.location = (50, 0)
-    separateColor = nodeTree.nodes.new('ShaderNodeSeparateColor')
-    separateColor.location = (-150, 0)
-    normalMap = nodeTree.nodes.new('ShaderNodeNormalMap')
-    normalMap.location = (-150, -150)
-
-    bsdf.inputs['IOR'].default_value = 1
-    bsdf.inputs['Emission Strength'].default_value = 1
-
-    bpy.ops.file.unpack_all(method='REMOVE')
-    
-    PrettyPrint(f"Setting up any custom templates. Current Template: {Entry.MaterialTemplate}")
-
-    if Entry.MaterialTemplate == "basic": SetupBasicBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap)
-    elif Entry.MaterialTemplate == "basic+": SetupBasicBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap)
-    elif Entry.MaterialTemplate == "original": SetupOriginalBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap)
-    elif Entry.MaterialTemplate == "emissive": SetupEmissiveBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap)
-    elif Entry.MaterialTemplate == "alphaclip": SetupAlphaClipBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap, mat)
-    elif Entry.MaterialTemplate == "advanced": SetupAdvancedBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap, RoughnessMaskTex, group, mat)
+        if Entry.MaterialTemplate == "basic": SetupBasicBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap)
+        elif Entry.MaterialTemplate == "basic+": SetupBasicBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap)
+        elif Entry.MaterialTemplate == "original": SetupOriginalBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap)
+        elif Entry.MaterialTemplate == "emissive": SetupEmissiveBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap)
+        elif Entry.MaterialTemplate == "alphaclip": SetupAlphaClipBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap, mat)
+        elif Entry.MaterialTemplate == "advanced": SetupAdvancedBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap, RoughnessMaskTex, group, mat)
+    except AttributeError as e:
+        PrettyPrint(e)
     
 def SetupBasicBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap):
-    bsdf.inputs['Emission Strength'].default_value = 0
-    inputNode.location = (-750, 0)
-    SetupNormalMapTemplate(nodeTree, inputNode, normalMap, bsdf)
-    nodeTree.links.new(inputNode.outputs['Base Color'], bsdf.inputs['Base Color'])
-    nodeTree.links.new(inputNode.outputs['PBR'], separateColor.inputs['Color'])
-    nodeTree.links.new(separateColor.outputs['Red'], bsdf.inputs['Metallic'])
-    nodeTree.links.new(separateColor.outputs['Green'], bsdf.inputs['Roughness'])
-    nodeTree.links.new(bsdf.outputs['BSDF'], outputNode.inputs['Surface'])
+    try:
+        bsdf.inputs['Emission Strength'].default_value = 0
+        inputNode.location = (-750, 0)
+        SetupNormalMapTemplate(nodeTree, inputNode, normalMap, bsdf)
+        nodeTree.links.new(inputNode.outputs['Base Color'], bsdf.inputs['Base Color'])
+        nodeTree.links.new(inputNode.outputs['PBR'], separateColor.inputs['Color'])
+        nodeTree.links.new(separateColor.outputs['Red'], bsdf.inputs['Metallic'])
+        nodeTree.links.new(separateColor.outputs['Green'], bsdf.inputs['Roughness'])
+        nodeTree.links.new(bsdf.outputs['BSDF'], outputNode.inputs['Surface'])
+    except AttributeError as e:
+        PrettyPrint(e)
 
 def SetupOriginalBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap):
-    inputNode.location = (-800, -0)
-    SetupNormalMapTemplate(nodeTree, inputNode, normalMap, bsdf)
-    nodeTree.links.new(inputNode.outputs['Base Color'], bsdf.inputs['Base Color'])
-    nodeTree.links.new(inputNode.outputs['Emission'], bsdf.inputs['Emission Color'])
-    nodeTree.links.new(inputNode.outputs['PBR'], separateColor.inputs['Color'])
-    nodeTree.links.new(separateColor.outputs['Red'], bsdf.inputs['Metallic'])
-    nodeTree.links.new(separateColor.outputs['Green'], bsdf.inputs['Roughness'])
-    nodeTree.links.new(bsdf.outputs['BSDF'], outputNode.inputs['Surface'])
+    try:
+        inputNode.location = (-800, -0)
+        SetupNormalMapTemplate(nodeTree, inputNode, normalMap, bsdf)
+        nodeTree.links.new(inputNode.outputs['Base Color'], bsdf.inputs['Base Color'])
+        nodeTree.links.new(inputNode.outputs['Emission'], bsdf.inputs['Emission Color'])
+        nodeTree.links.new(inputNode.outputs['PBR'], separateColor.inputs['Color'])
+        nodeTree.links.new(separateColor.outputs['Red'], bsdf.inputs['Metallic'])
+        nodeTree.links.new(separateColor.outputs['Green'], bsdf.inputs['Roughness'])
+        nodeTree.links.new(bsdf.outputs['BSDF'], outputNode.inputs['Surface'])
+    except Exception as e:
+        PrettyPrint(e)
 
 def SetupEmissiveBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap):
-    nodeTree.links.new(inputNode.outputs['Base Color/Metallic'], bsdf.inputs['Base Color'])
-    nodeTree.links.new(inputNode.outputs['Emission'], bsdf.inputs['Emission Color'])
-    nodeTree.links.new(inputNode.outputs['Normal/AO/Roughness'], separateColor.inputs['Color'])
-    nodeTree.links.new(separateColor.outputs['Red'], normalMap.inputs['Color'])
-    nodeTree.links.new(normalMap.outputs['Normal'], bsdf.inputs['Normal'])
-    nodeTree.links.new(bsdf.outputs['BSDF'], outputNode.inputs['Surface'])
+    try:
+        nodeTree.links.new(inputNode.outputs['Base Color/Metallic'], bsdf.inputs['Base Color'])
+        nodeTree.links.new(inputNode.outputs['Emission'], bsdf.inputs['Emission Color'])
+        nodeTree.links.new(inputNode.outputs['Normal/AO/Roughness'], separateColor.inputs['Color'])
+        nodeTree.links.new(separateColor.outputs['Red'], normalMap.inputs['Color'])
+        nodeTree.links.new(normalMap.outputs['Normal'], bsdf.inputs['Normal'])
+        nodeTree.links.new(bsdf.outputs['BSDF'], outputNode.inputs['Surface'])
+    except AttributeError as e:
+        PrettyPrint(e)
 
 def SetupAlphaClipBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap, mat):
     bsdf.inputs['Emission Strength'].default_value = 0
-    combineColor = nodeTree.nodes.new('ShaderNodeCombineColor')
-    combineColor.inputs['Blue'].default_value = 1
-    combineColor.location = (-350, -150)
-    separateColor.location = (-550, -150)
-    inputNode.location = (-750, 0)
-    mat.blend_method = 'CLIP'
-    nodeTree.links.new(inputNode.outputs['Base Color/Metallic'], bsdf.inputs['Base Color'])
-    nodeTree.links.new(inputNode.outputs['Alpha Mask'], bsdf.inputs['Alpha'])
-    nodeTree.links.new(inputNode.outputs['Normal/AO/Roughness'], separateColor.inputs['Color'])
-    nodeTree.links.new(separateColor.outputs['Red'], combineColor.inputs['Red'])
-    nodeTree.links.new(separateColor.outputs['Green'], combineColor.inputs['Green'])
-    nodeTree.links.new(combineColor.outputs['Color'], normalMap.inputs['Color'])
-    nodeTree.links.new(normalMap.outputs['Normal'], bsdf.inputs['Normal'])
-    nodeTree.links.new(bsdf.outputs['BSDF'], outputNode.inputs['Surface'])
+    try:
+        combineColor = nodeTree.nodes.new('ShaderNodeCombineColor')
+        combineColor.inputs['Blue'].default_value = 1
+        combineColor.location = (-350, -150)
+        separateColor.location = (-550, -150)
+        inputNode.location = (-750, 0)
+        mat.blend_method = 'CLIP'
+        nodeTree.links.new(inputNode.outputs['Base Color/Metallic'], bsdf.inputs['Base Color'])
+        nodeTree.links.new(inputNode.outputs['Alpha Mask'], bsdf.inputs['Alpha'])
+        nodeTree.links.new(inputNode.outputs['Normal/AO/Roughness'], separateColor.inputs['Color'])
+        nodeTree.links.new(separateColor.outputs['Red'], combineColor.inputs['Red'])
+        nodeTree.links.new(separateColor.outputs['Green'], combineColor.inputs['Green'])
+        nodeTree.links.new(combineColor.outputs['Color'], normalMap.inputs['Color'])
+        nodeTree.links.new(normalMap.outputs['Normal'], bsdf.inputs['Normal'])
+        nodeTree.links.new(bsdf.outputs['BSDF'], outputNode.inputs['Surface'])
+    except AttributeError as e:
+        PrettyPrint(e)
 
 def SetupNormalMapTemplate(nodeTree, inputNode, normalMap, bsdf):
-    separateColorNormal = nodeTree.nodes.new('ShaderNodeSeparateColor')
-    separateColorNormal.location = (-550, -150)
-    combineColorNormal = nodeTree.nodes.new('ShaderNodeCombineColor')
-    combineColorNormal.location = (-350, -150)
-    combineColorNormal.inputs['Blue'].default_value = 1
-    nodeTree.links.new(inputNode.outputs['Normal'], separateColorNormal.inputs['Color'])
-    nodeTree.links.new(separateColorNormal.outputs['Red'], combineColorNormal.inputs['Red'])
-    nodeTree.links.new(separateColorNormal.outputs['Green'], combineColorNormal.inputs['Green'])
-    nodeTree.links.new(combineColorNormal.outputs['Color'], normalMap.inputs['Color'])
-    nodeTree.links.new(normalMap.outputs['Normal'], bsdf.inputs['Normal'])
+    try:
+        separateColorNormal = nodeTree.nodes.new('ShaderNodeSeparateColor')
+        separateColorNormal.location = (-550, -150)
+        combineColorNormal = nodeTree.nodes.new('ShaderNodeCombineColor')
+        combineColorNormal.location = (-350, -150)
+        combineColorNormal.inputs['Blue'].default_value = 1
+        nodeTree.links.new(inputNode.outputs['Normal'], separateColorNormal.inputs['Color'])
+        nodeTree.links.new(separateColorNormal.outputs['Red'], combineColorNormal.inputs['Red'])
+        nodeTree.links.new(separateColorNormal.outputs['Green'], combineColorNormal.inputs['Green'])
+        nodeTree.links.new(combineColorNormal.outputs['Color'], normalMap.inputs['Color'])
+        nodeTree.links.new(normalMap.outputs['Normal'], bsdf.inputs['Normal'])
+    except AttributeError as e:
+        PrettyPrint(e)
 
 def SetupAdvancedBlenderMaterial(nodeTree, inputNode, outputNode, bsdf, separateColor, normalMap, RoughnessMaskTex, group, mat):
     bsdf.inputs['Emission Strength'].default_value = 0
     nodeTree.nodes.remove(separateColor)
-    inputNode.location = (-750, 0)
-    separateColorNormal = nodeTree.nodes.new('ShaderNodeSeparateColor')
-    separateColorNormal.location = (-550, -150)
-    combineColorNormal = nodeTree.nodes.new('ShaderNodeCombineColor')
-    combineColorNormal.location = (-350, -150)
-    nodeTree.links.new(inputNode.outputs['Normal/AO/Roughness'], separateColorNormal.inputs['Color'])
-    nodeTree.links.new(separateColorNormal.outputs['Red'], combineColorNormal.inputs['Red'])
-    nodeTree.links.new(separateColorNormal.outputs['Green'], combineColorNormal.inputs['Green'])
-    nodeTree.links.new(normalMap.outputs['Normal'], bsdf.inputs['Normal'])
-    nodeTree.links.new(combineColorNormal.outputs['Color'], normalMap.inputs['Color'])
-    nodeTree.links.new(inputNode.outputs['Color/Emission Mask'], bsdf.inputs['Base Color'])
-    nodeTree.links.new(inputNode.outputs['Metallic'], bsdf.inputs['Metallic'])
+    try:
+        inputNode.location = (-750, 0)
+        separateColorNormal = nodeTree.nodes.new('ShaderNodeSeparateColor')
+        separateColorNormal.location = (-550, -150)
+        combineColorNormal = nodeTree.nodes.new('ShaderNodeCombineColor')
+        combineColorNormal.location = (-350, -150)
+        nodeTree.links.new(inputNode.outputs['Normal/AO/Roughness'], separateColorNormal.inputs['Color'])
+        nodeTree.links.new(separateColorNormal.outputs['Red'], combineColorNormal.inputs['Red'])
+        nodeTree.links.new(separateColorNormal.outputs['Green'], combineColorNormal.inputs['Green'])
+        nodeTree.links.new(normalMap.outputs['Normal'], bsdf.inputs['Normal'])
+        nodeTree.links.new(combineColorNormal.outputs['Color'], normalMap.inputs['Color'])
+        nodeTree.links.new(inputNode.outputs['Color/Emission Mask'], bsdf.inputs['Base Color'])
+        nodeTree.links.new(inputNode.outputs['Metallic'], bsdf.inputs['Metallic'])
 
-    nodeTree.interface.new_socket(name="Roughness", in_out ="INPUT", socket_type="NodeSocketFloat").hide_value = True
-    mat.node_tree.links.new(RoughnessMaskTex.outputs['Alpha'], group.inputs['Roughness'])
-    nodeTree.links.new(inputNode.outputs['Roughness'], bsdf.inputs['Roughness'])
-    
-    nodeTree.links.new(bsdf.outputs['BSDF'], outputNode.inputs['Surface'])
+        nodeTree.interface.new_socket(name="Roughness", in_out ="INPUT", socket_type="NodeSocketFloat").hide_value = True
+        mat.node_tree.links.new(RoughnessMaskTex.outputs['Alpha'], group.inputs['Roughness'])
+        nodeTree.links.new(inputNode.outputs['Roughness'], bsdf.inputs['Roughness'])
+        
+        nodeTree.links.new(bsdf.outputs['BSDF'], outputNode.inputs['Surface'])
+    except AttributeError as e:
+        PrettyPrint(e)
 
 def CreateGenericMaterial(ID, StingrayMat, mat):
-    idx = 0
-    for TextureID in StingrayMat.TexIDs:
-        # Create Node
-        texImage = mat.node_tree.nodes.new('ShaderNodeTexImage')
-        texImage.location = (-450, 850 - 300*idx)
+    try:
+        idx = 0
+        for TextureID in StingrayMat.TexIDs:
+            # Create Node
+            texImage = mat.node_tree.nodes.new('ShaderNodeTexImage')
+            texImage.location = (-450, 850 - 300*idx)
 
-        # Load Texture
-        try:    bpy.data.images[str(TextureID)]
-        except: Global_TocManager.Load(TextureID, TexID, False, True)
-        # Apply Texture
-        try: texImage.image = bpy.data.images[str(TextureID)]
-        except:
-            PrettyPrint(f"Failed to load texture {TextureID}. This is not fatal, but does mean that the materials in Blender will have empty image texture nodes", "warn")
-            pass
-        idx +=1
+            # Load Texture
+            try:    bpy.data.images[str(TextureID)]
+            except: Global_TocManager.Load(TextureID, TexID, False, True)
+            # Apply Texture
+            try: texImage.image = bpy.data.images[str(TextureID)]
+            except:
+                PrettyPrint(f"Failed to load texture {TextureID}. This is not fatal, but does mean that the materials in Blender will have empty image texture nodes", "warn")
+                pass
+            idx +=1
+    except AttributeError as e:
+        PrettyPrint(e)
 
 def AddMaterialToBlend_EMPTY(ID):
     try:
